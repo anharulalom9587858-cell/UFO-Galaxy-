@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>UFO Escape: Red Laser Edition</title>
+    <style>
+        :root { --neon: #00f3ff; --pink: #ff00ff; --laser: #ff0000; --gold: #f9ca24; --pipe-light: #90ee90; --pipe-dark: #7ccd7c; }
+        body {
+            margin: 0; background: #050508; color: white;
+            font-family: 'Segoe UI', sans-serif; overflow: hidden;
+            display: flex; justify-content: center; align-items: center; height: 100vh;
+        }
+        #stage {
+            position: relative; width: 360px; height: 640px;
+            background: radial-gradient(circle at center, #1b2735 0%, #090a0f 100%);
+            border-radius: 12px; overflow: hidden;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        }
+        .ui-page {
+            position: absolute; inset: 0; z-index: 30;
+            background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .active { display: flex; }
+        canvas { position: absolute; top: 0; left: 0; z-index: 5; }
+        
+        .btn {
+            padding: 15px; margin: 8px; font-size: 15px; font-weight: bold;
+            background: rgba(255,255,255,0.05); border: 2px solid var(--pink); color: white;
+            border-radius: 30px; width: 240px; cursor: pointer;
+            transition: 0.2s; text-transform: uppercase; letter-spacing: 1px;
+            text-decoration: none; display: inline-block; text-align: center;
+        }
+        .btn:active { transform: scale(0.95); background: var(--pink); }
+        .btn-cyan { border-color: var(--neon); color: var(--neon); }
+
+        #hud {
+            position: absolute; top: 20px; width: 100%;
+            display: flex; justify-content: space-around; align-items: center;
+            z-index: 20; pointer-events: none;
+            font-family: monospace; font-size: 16px; color: var(--neon);
+            text-shadow: 0 0 8px var(--neon);
+        }
+        
+        /* Pause button style */
+        #pause-trigger {
+            pointer-events: auto; background: none; border: 1px solid var(--neon);
+            color: var(--neon); border-radius: 5px; cursor: pointer; padding: 5px 10px;
+        }
+
+        .footer-link {
+            position: absolute; bottom: 15px; font-size: 11px;
+            color: rgba(255,255,255,0.5); text-decoration: underline;
+            letter-spacing: 1px; z-index: 40; cursor: pointer;
+        }
+
+        .modal-overlay {
+            position: absolute; inset: 0; z-index: 100;
+            background: rgba(0,0,0,0.9); display: none;
+            flex-direction: column; align-items: center; justify-content: center;
+            text-align: center;
+        }
+        .modal-box {
+            background: #111; border: 2px solid var(--neon);
+            padding: 30px; border-radius: 15px; width: 80%;
+        }
+
+        .skin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding: 20px; overflow-y: auto; max-height: 400px; }
+        .skin { padding: 15px; border: 1px solid #333; border-radius: 15px; background: #111; cursor: pointer; }
+        .selected-skin { border-color: var(--neon); box-shadow: 0 0 10px var(--neon); }
+    </style>
+</head>
+<body>
+
+<div id="stage">
+    <div id="hud">
+        <div id="score-text">SCORE: 0</div>
+        <button id="pause-trigger" onclick="togglePause(event)">PAUSE</button>
+        <div id="best-text">BEST: 0</div>
+    </div>
+
+    <div id="menu" class="ui-page active">
+        <h1 style="color:var(--neon); text-shadow: 0 0 20px var(--neon); font-size: 42px; margin-bottom: 0;">UFO</h1>
+        <p style="margin-bottom: 25px; letter-spacing: 8px; color: var(--laser);">GALAXY</p>
+        <button class="btn" onclick="initAudio(); play();">START MISSION</button>
+        <button class="btn" onclick="initAudio(); openStore();">HANGAR</button>
+        <a href="https://anharulalom9587858-cell.github.io/Tic-Tac-Toe-/" target="_blank" class="btn btn-cyan">Another Game From Us</a>
+    </div>
+
+    <div id="pause-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h2 style="color:var(--neon); margin-bottom: 20px;">MISSION PAUSED</h2>
+            <button class="btn" onclick="togglePause()">RESUME</button>
+            <button class="btn" style="border-color: #666;" onclick="location.reload()">RESTART</button>
+        </div>
+    </div>
+
+    <div id="store" class="ui-page">
+        <h2 style="color:var(--pink)">HANGAR</h2>
+        <div id="stars-val" style="margin-bottom: 10px; color: gold;">⭐ STARS: 0</div>
+        <div class="skin-grid" id="skin-list"></div>
+        <button class="btn" onclick="closeStore()">BACK</button>
+    </div>
+
+    <div id="death-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h2 style="color:#ff0044; margin-bottom: 5px;">Crashed!</h2>
+            <p id="final-score" style="font-size: 20px; color: var(--neon); margin-bottom: 20px;">SCORE: 0</p>
+            <button class="btn" onclick="hidePopups(); play();">REPLAY</button>
+            <button class="btn" style="border-color: #666;" onclick="hidePopups(); showMenu();">MENU</button>
+        </div>
+    </div>
+
+    <canvas id="g"></canvas>
+</div>
+
+<script>
+/** AUDIO & ENGINE SETUP **/
+let audioCtx;
+function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+function playTone(freq, type, duration, vol) {
+    if(!audioCtx) return;
+    const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + duration);
+}
+
+const sfx = {
+    jump: () => playTone(350, 'triangle', 0.15, 0.1),
+    score: () => playTone(900, 'square', 0.2, 0.05),
+    star: () => { playTone(1100, 'sine', 0.1, 0.1); playTone(1400, 'sine', 0.2, 0.1); },
+    dead: () => playTone(80, 'sawtooth', 0.6, 0.2)
+};
+
+const cvs = document.getElementById('g'); const ctx = cvs.getContext('2d');
+cvs.width = 360; cvs.height = 640;
+
+let bird = { x: 70, y: 320, v: 0, p: [] };
+let pipes = [];
+let stars = parseInt(localStorage.getItem('ufo_s')) || 0;
+let best = parseInt(localStorage.getItem('ufo_best')) || 0;
+let unlocked = JSON.parse(localStorage.getItem('ufo_u')) || ['cyan'];
+let current = localStorage.getItem('ufo_c') || 'cyan';
+let score = 0, run = false, isPaused = false, frame = 0;
+
+// Background Elements
+let starField = Array.from({length: 80}, () => ({ x: Math.random()*360, y: Math.random()*640, s: Math.random()*1.5 + 0.5, o: Math.random() }));
+let satellite = { x: 400, y: 100, s: 0.8, angle: 0 };
+let rocket = { x: -100, y: 500, s: 1.2, angle: -0.5 };
+
+let skins = [ 
+    {id:'cyan', c:'#00f3ff', p:0}, {id:'lime', c:'#32ff7e', p:10}, 
+    {id:'pink', c:'#ff00ff', p:25}, {id:'gold', c:'#f9ca24', p:50} 
+];
+
+function togglePause(e) {
+    if(e) e.stopPropagation();
+    if(!run) return;
+    isPaused = !isPaused;
+    document.getElementById('pause-modal').style.display = isPaused ? 'flex' : 'none';
+    if(!isPaused) requestAnimationFrame(loop);
+}
+
+function showPopup(id) { document.getElementById(id).style.display = 'flex'; }
+function hidePopups() { document.querySelectorAll('.modal-overlay').forEach(m => m.style.display = 'none'); }
+function showMenu() { document.getElementById('menu').classList.add('active'); }
+
+function play() {
+    document.querySelectorAll('.ui-page').forEach(p => p.classList.remove('active'));
+    bird = { x: 70, y: 320, v: 0, p: [] };
+    pipes = []; score = 0; run = true; isPaused = false;
+    requestAnimationFrame(loop);
+}
+
+function openStore() {
+    document.getElementById('menu').classList.remove('active');
+    document.getElementById('store').classList.add('active');
+    drawStore();
+}
+
+function closeStore() {
+    document.getElementById('store').classList.remove('active');
+    document.getElementById('menu').classList.add('active');
+}
+
+function drawStore() {
+    document.getElementById('stars-val').innerText = "⭐ STARS: " + stars;
+    const list = document.getElementById('skin-list'); list.innerHTML = '';
+    skins.forEach(s => {
+        const isU = unlocked.includes(s.id); const active = current == s.id;
+        const div = document.createElement('div'); div.className = `skin ${active ? 'selected-skin' : ''}`;
+        div.innerHTML = `<div style="width:40px;height:12px;background:${s.c};margin:5px auto;border-radius:10px;box-shadow:0 0 10px ${s.c}"></div>
+                         <div style="font-size:11px;margin-top:8px;text-align:center;font-weight:bold;">${isU ? (active?'EQUIPPED':'SELECT') : '⭐ '+s.p}</div>`;
+        div.onclick = () => {
+            if(isU) { current = s.id; } 
+            else if(stars >= s.p) { stars -= s.p; unlocked.push(s.id); current = s.id; sfx.star(); }
+            localStorage.setItem('ufo_s', stars); localStorage.setItem('ufo_u', JSON.stringify(unlocked)); localStorage.setItem('ufo_c', current);
+            drawStore();
+        };
+        list.appendChild(div);
+    });
+}
+
+function drawBackground() {
+    let grad = ctx.createRadialGradient(180, 320, 50, 180, 320, 400);
+    grad.addColorStop(0, '#0d1b2a'); grad.addColorStop(1, '#020205');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, 360, 640);
+    starField.forEach(s => {
+        s.x -= s.s * 0.3; if(s.x < -10) s.x = 370;
+        ctx.fillStyle = `rgba(255, 255, 255, ${s.o})`;
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.s, 0, 7); ctx.fill();
+    });
+    satellite.x -= 0.5; satellite.angle += 0.01;
+    if(satellite.x < -100) { satellite.x = 450; satellite.y = Math.random()*200; }
+    ctx.save(); ctx.translate(satellite.x, satellite.y); ctx.rotate(satellite.angle);
+    ctx.fillStyle = "#999"; ctx.fillRect(-10, -5, 20, 10);
+    ctx.fillStyle = "#44f"; ctx.fillRect(-25, -3, 15, 6);
+    ctx.fillStyle = "#44f"; ctx.fillRect(10, -3, 15, 6);
+    ctx.restore();
+    rocket.x += 1.2; rocket.y -= 0.4;
+    if(rocket.x > 500) { rocket.x = -150; rocket.y = 400 + Math.random()*200; }
+    ctx.save(); ctx.translate(rocket.x, rocket.y); ctx.rotate(rocket.angle);
+    ctx.fillStyle = "#eee"; ctx.beginPath(); ctx.ellipse(0, 0, 20, 8, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#f44"; ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(-30, -10); ctx.lineTo(-30, 10); ctx.fill();
+    ctx.fillStyle = "#ffaa00"; ctx.beginPath(); ctx.arc(-22, 0, 5 + Math.random()*5, 0, 7); ctx.fill();
+    ctx.restore();
+}
+
+function loop() {
+    if(!run || isPaused) return;
+    frame++;
+    bird.v += 0.25; bird.y += bird.v;
+    bird.p.push({x: bird.x - 12, y: bird.y, r: Math.random()*4+1, l: 1});
+    bird.p.forEach((p, i) => { p.x -= 2.5; p.l -= 0.05; if(p.l <= 0) bird.p.splice(i, 1); });
+
+    if(pipes.length == 0 || pipes[pipes.length-1].x < 170) {
+        let h = Math.random() * (cvs.height - 320) + 80;
+        pipes.push({x:360, h:h, s: Math.random() > 0.8, passed: false});
+    }
+
+    drawBackground();
+    bird.p.forEach(p => { ctx.fillStyle = `rgba(0, 243, 255, ${p.l})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill(); });
+
+    let col = skins.find(s=>s.id==current).c;
+    ctx.shadowBlur = 15; ctx.shadowColor = col; ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(bird.x, bird.y, 20, 9, 0, 0, 7); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.beginPath(); ctx.arc(bird.x, bird.y-4, 9, 0, 3.2, true); ctx.fill();
+
+    pipes.forEach((p, i) => {
+        p.x -= 3;
+        ctx.fillStyle = "#90ee90"; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1;
+        ctx.fillRect(p.x, 0, 40, p.h); ctx.strokeRect(p.x, 0, 40, p.h);
+        ctx.fillStyle = "#7ccd7c"; ctx.fillRect(p.x, p.h - 15, 40, 15);
+        ctx.fillStyle = "#90ee90"; ctx.fillRect(p.x, p.h + 170, 40, 640); 
+        ctx.strokeRect(p.x, p.h + 170, 40, 640);
+        ctx.fillStyle = "#7ccd7c"; ctx.fillRect(p.x, p.h + 170, 40, 15);
+        let flicker = Math.random() > 0.1 ? 1 : 0.3;
+        ctx.shadowBlur = 15; ctx.shadowColor = "#ff0000";
+        ctx.strokeStyle = `rgba(255, 0, 0, ${flicker})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(p.x+20, p.h); ctx.lineTo(p.x+20, p.h+170); ctx.stroke();
+        ctx.shadowBlur = 0;
+        if(p.s) {
+            ctx.fillStyle = "gold"; ctx.beginPath(); ctx.arc(p.x+20, p.h+85, 8, 0, 7); ctx.fill();
+            if(Math.hypot(bird.x-(p.x+20), bird.y-(p.h+85)) < 25) { p.s = false; stars++; sfx.star(); }
+        }
+        if(bird.x+15 > p.x && bird.x-15 < p.x+40 && (bird.y-8 < p.h || bird.y+8 > p.h+170)) { run = false; end(); }
+        if(p.x < bird.x && !p.passed) { p.passed = true; score++; sfx.score(); }
+    });
+    
+    pipes = pipes.filter(p => p.x > -50);
+    if(bird.y > 640 || bird.y < 0) { run = false; end(); }
+    if(score > best) best = score;
+    document.getElementById('score-text').innerText = `SCORE: ${score}`;
+    document.getElementById('best-text').innerText = `BEST: ${best}`;
+    requestAnimationFrame(loop);
+}
+
+function end() {
+    sfx.dead(); 
+    localStorage.setItem('ufo_s', stars); localStorage.setItem('ufo_best', best);
+    document.getElementById('final-score').innerText = "SCORE: " + score;
+    showPopup('death-modal');
+}
+
+const flap = (e) => { 
+    if(run && !isPaused) { bird.v = -5.4; sfx.jump(); } 
+    if(e && e.type !== 'keydown') e.preventDefault(); 
+};
+window.addEventListener('keydown', e => { 
+    if(e.code==='Space') flap(e); 
+    if(e.code==='KeyP') togglePause();
+});
+cvs.addEventListener('touchstart', flap, {passive: false});
+cvs.addEventListener('mousedown', flap);
+drawStore();
+</script>
+</body>
+</html>
